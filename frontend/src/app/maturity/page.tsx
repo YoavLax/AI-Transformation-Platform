@@ -25,8 +25,9 @@ import {
   Award,
   Target,
   BarChart,
+  RefreshCw,
 } from "lucide-react";
-import { getFromStorage, setToStorage, STORAGE_KEYS } from "@/lib/storage";
+import { api } from "@/lib/api";
 import { formatDate, generateId } from "@/lib/utils";
 import type { TeamMaturity, MaturityScores } from "@/types";
 
@@ -46,7 +47,14 @@ const DIMENSIONS = [
   { key: "innovation", label: "Innovation", description: "Experimenting with new AI capabilities" },
 ];
 
-const sampleTeamMaturity: TeamMaturity[] = [];
+interface MaturitySummary {
+  total_teams: number;
+  org_average_scores: MaturityScores;
+  org_overall_level: string;
+  advanced_teams: number;
+  avg_overall_score: number;
+  level_distribution: Record<string, number>;
+}
 
 function calculateOverallLevel(scores: MaturityScores): TeamMaturity["overall_level"] {
   const avg = (scores.adoption + scores.proficiency + scores.integration + scores.governance + scores.innovation) / 5;
@@ -59,76 +67,76 @@ function calculateOverallLevel(scores: MaturityScores): TeamMaturity["overall_le
 
 export default function MaturityPage() {
   const [teams, setTeams] = useState<TeamMaturity[]>([]);
+  const [summary, setSummary] = useState<MaturitySummary | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingTeam, setEditingTeam] = useState<TeamMaturity | null>(null);
   const [selectedTeam, setSelectedTeam] = useState<TeamMaturity | null>(null);
 
+  const fetchData = async () => {
+    setIsLoading(true);
+    try {
+      const [teamsData, summaryData] = await Promise.all([
+        api.get<TeamMaturity[]>("/api/maturity"),
+        api.get<MaturitySummary>("/api/maturity/summary"),
+      ]);
+      setTeams(teamsData);
+      setSummary(summaryData);
+    } catch (error) {
+      console.error("Failed to fetch maturity data:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const stored = getFromStorage<TeamMaturity[]>(STORAGE_KEYS.TEAM_MATURITY, []);
-    setTeams(stored);
+    fetchData();
   }, []);
 
-  const saveTeam = (data: Partial<TeamMaturity>) => {
-    let updated: TeamMaturity[];
-    const scores = data.scores || { adoption: 0, proficiency: 0, integration: 0, governance: 0, innovation: 0 };
-    const overall_level = calculateOverallLevel(scores);
-
-    if (editingTeam) {
-      updated = teams.map((t) =>
-        t.id === editingTeam.id ? { ...t, ...data, overall_level } : t
-      );
-    } else {
-      const newTeam: TeamMaturity = {
-        id: generateId(),
+  const saveTeam = async (data: Partial<TeamMaturity>) => {
+    try {
+      const payload = {
         team: data.team || "",
         department: data.department || "Engineering",
-        assessment_date: new Date().toISOString().split("T")[0],
-        scores,
-        overall_level,
+        scores: data.scores || { adoption: 50, proficiency: 50, integration: 50, governance: 50, innovation: 50 },
         strengths: data.strengths || [],
         improvement_areas: data.improvement_areas || [],
         recommendations: data.recommendations || [],
         assessor: data.assessor || "AI Enablement Team",
       };
-      updated = [...teams, newTeam];
-    }
-    setTeams(updated);
-    setToStorage(STORAGE_KEYS.TEAM_MATURITY, updated);
-    setIsModalOpen(false);
-    setEditingTeam(null);
-  };
 
-  const deleteTeam = (id: string) => {
-    const updated = teams.filter((t) => t.id !== id);
-    setTeams(updated);
-    setToStorage(STORAGE_KEYS.TEAM_MATURITY, updated);
-    if (selectedTeam?.id === id) {
-      setSelectedTeam(null);
-    }
-  };
-
-  // Calculate org-wide averages
-  const orgAvgScores = teams.length > 0
-    ? {
-        adoption: Math.round(teams.reduce((sum, t) => sum + t.scores.adoption, 0) / teams.length),
-        proficiency: Math.round(teams.reduce((sum, t) => sum + t.scores.proficiency, 0) / teams.length),
-        integration: Math.round(teams.reduce((sum, t) => sum + t.scores.integration, 0) / teams.length),
-        governance: Math.round(teams.reduce((sum, t) => sum + t.scores.governance, 0) / teams.length),
-        innovation: Math.round(teams.reduce((sum, t) => sum + t.scores.innovation, 0) / teams.length),
+      if (editingTeam) {
+        await api.put(`/api/maturity/${editingTeam.id}`, payload);
+      } else {
+        await api.post("/api/maturity", payload);
       }
-    : { adoption: 0, proficiency: 0, integration: 0, governance: 0, innovation: 0 };
+      
+      await fetchData();
+      setIsModalOpen(false);
+      setEditingTeam(null);
+      setSelectedTeam(null);
+    } catch (error) {
+      console.error("Failed to save team maturity:", error);
+    }
+  };
 
-  const orgOverallLevel = calculateOverallLevel(orgAvgScores);
-  const advancedTeams = teams.filter((t) => t.overall_level === "advanced" || t.overall_level === "leading").length;
-  const avgOverallScore = teams.length > 0
-    ? Math.round(
-        teams.reduce(
-          (sum, t) =>
-            sum + (t.scores.adoption + t.scores.proficiency + t.scores.integration + t.scores.governance + t.scores.innovation) / 5,
-          0
-        ) / teams.length
-      )
-    : 0;
+  const deleteTeam = async (id: string) => {
+    try {
+      await api.delete(`/api/maturity/${id}`);
+      await fetchData();
+      if (selectedTeam?.id === id) {
+        setSelectedTeam(null);
+      }
+    } catch (error) {
+      console.error("Failed to delete team maturity:", error);
+    }
+  };
+
+  // Use summary data for org-wide stats
+  const orgAvgScores = summary?.org_average_scores || { adoption: 0, proficiency: 0, integration: 0, governance: 0, innovation: 0 };
+  const orgOverallLevel = summary?.org_overall_level || "novice";
+  const advancedTeams = summary?.advanced_teams || 0;
+  const avgOverallScore = summary?.avg_overall_score || 0;
 
   const radarData = selectedTeam
     ? DIMENSIONS.map((d) => ({
@@ -149,10 +157,16 @@ export default function MaturityPage() {
         description="Assess and track AI maturity levels across engineering teams"
         icon={Users}
         actions={
-          <Button onClick={() => setIsModalOpen(true)}>
-            <Plus className="w-4 h-4 mr-2" />
-            New Assessment
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={fetchData} disabled={isLoading}>
+              <RefreshCw className={`w-4 h-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
+            <Button onClick={() => setIsModalOpen(true)}>
+              <Plus className="w-4 h-4 mr-2" />
+              New Assessment
+            </Button>
+          </div>
         }
       />
 
@@ -160,7 +174,7 @@ export default function MaturityPage() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         <StatCard
           title="Teams Assessed"
-          value={teams.length.toString()}
+          value={summary?.total_teams?.toString() || "0"}
           icon={Users}
         />
         <StatCard
@@ -171,13 +185,11 @@ export default function MaturityPage() {
         <StatCard
           title="Avg Maturity Score"
           value={`${avgOverallScore}%`}
-          change={5}
-          changeLabel="vs last quarter"
           icon={Target}
         />
         <StatCard
           title="Advanced+ Teams"
-          value={`${advancedTeams}/${teams.length}`}
+          value={`${advancedTeams}/${summary?.total_teams || 0}`}
           icon={TrendingUp}
         />
       </div>

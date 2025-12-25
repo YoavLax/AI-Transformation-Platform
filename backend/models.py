@@ -216,3 +216,53 @@ class ChangeTemplate(BaseModel):
     title: str
     category: TemplateCategory
     content: str
+
+
+# Team AI Maturity Models
+class MaturityLevel(str, Enum):
+    novice = "novice"
+    developing = "developing"
+    proficient = "proficient"
+    advanced = "advanced"
+    leading = "leading"
+
+
+class MaturityScores(BaseModel):
+    adoption: int  # 0-100: How many team members actively use AI tools
+    proficiency: int  # 0-100: How effectively they use AI tools
+    integration: int  # 0-100: How well AI is integrated into workflows
+    governance: int  # 0-100: Following best practices and policies
+    innovation: int  # 0-100: Experimenting with new AI capabilities
+
+
+class TeamMaturityCreate(BaseModel):
+    team: str
+    department: str
+    scores: MaturityScores
+    strengths: Optional[List[str]] = None
+    improvement_areas: Optional[List[str]] = None
+    recommendations: Optional[List[str]] = None
+    assessor: Optional[str] = "AI Enablement Team"
+
+
+class TeamMaturityUpdate(BaseModel):
+    team: Optional[str] = None
+    department: Optional[str] = None
+    scores: Optional[MaturityScores] = None
+    strengths: Optional[List[str]] = None
+    improvement_areas: Optional[List[str]] = None
+    recommendations: Optional[List[str]] = None
+    assessor: Optional[str] = None
+
+
+class TeamMaturity(BaseModel):
+    id: str
+    team: str
+    department: str
+    assessment_date: datetime
+    scores: MaturityScores
+    overall_level: MaturityLevel
+    strengths: List[str]
+    improvement_areas: List[str]
+    recommendations: List[str]
+    assessor: str
