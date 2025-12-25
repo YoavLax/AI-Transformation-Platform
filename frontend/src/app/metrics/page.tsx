@@ -128,10 +128,46 @@ export default function MetricsPage() {
       const metricsData = await response.json();
       setData(metricsData);
       setLastRefresh(new Date());
+      
+      // Sync metrics to backend for dashboard aggregation
+      syncMetricsToBackend(metricsData);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Sync metrics to backend for dashboard
+  const syncMetricsToBackend = async (metricsData: CopilotMetrics) => {
+    try {
+      const syncPayload = {
+        summary: {
+          total_active_users: metricsData.summary?.totalActiveUsers || 0,
+          total_engaged_users: metricsData.summary?.totalEngagedUsers || 0,
+          total_licenses: metricsData.summary?.totalLicenses || 0,
+          acceptance_rate: metricsData.summary?.acceptanceRate || 0,
+          total_suggestions: metricsData.summary?.totalSuggestions || 0,
+          total_acceptances: metricsData.summary?.totalAcceptances || 0,
+          total_chats: metricsData.summary?.totalChats || 0,
+        },
+        teams: (metricsData.teams || []).map(t => ({
+          org: t.org,
+          slug: t.slug,
+          name: t.name,
+          total_active_users: t.totalActiveUsers,
+          total_engaged_users: t.totalEngagedUsers,
+          acceptance_rate: t.acceptanceRate,
+        })),
+      };
+      
+      await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/metrics/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(syncPayload),
+      });
+    } catch (error) {
+      console.error('Failed to sync metrics to backend:', error);
     }
   };
 

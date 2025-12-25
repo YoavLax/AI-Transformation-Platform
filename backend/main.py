@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routes import assessments, use_cases, governance, value_tracking, blueprints, learning
+from routes import assessments, use_cases, governance, value_tracking, blueprints, learning, dashboard, assistants, metrics
 
 app = FastAPI(
     title="AI-OS API",
@@ -18,6 +18,9 @@ app.add_middleware(
 )
 
 # Include routers
+app.include_router(dashboard.router, prefix="/api/dashboard", tags=["Dashboard"])
+app.include_router(assistants.router, prefix="/api/assistants", tags=["AI Assistants"])
+app.include_router(metrics.router, prefix="/api/metrics", tags=["Usage Metrics"])
 app.include_router(assessments.router, prefix="/api/assessments", tags=["Assessments"])
 app.include_router(use_cases.router, prefix="/api/use-cases", tags=["Use Cases"])
 app.include_router(governance.router, prefix="/api/governance", tags=["Governance"])

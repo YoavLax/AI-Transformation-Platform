@@ -1,6 +1,8 @@
 # Dependency directories
 node_modules/
 jspm_packages/
+.next
+__pycache__/
 
 # TypeScript compiled output
 dist/

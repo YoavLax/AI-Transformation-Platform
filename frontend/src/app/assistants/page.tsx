@@ -109,9 +109,25 @@ export default function AIAssistantsPage() {
     const stored = getFromStorage<AIAssistant[]>(STORAGE_KEYS.AI_ASSISTANTS, []);
     setAssistants(stored);
     
+    // Sync to backend for dashboard aggregation
+    syncToBackend(stored);
+    
     // Auto-sync GitHub Copilot data on page load
     syncGitHubCopilot();
   }, []);
+
+  // Sync assistants to backend for dashboard
+  const syncToBackend = async (data: AIAssistant[]) => {
+    try {
+      await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/assistants/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+    } catch (error) {
+      console.error('Failed to sync assistants to backend:', error);
+    }
+  };
 
   const saveAssistant = (data: Partial<AIAssistant>) => {
     let updated: AIAssistant[];
@@ -139,6 +155,7 @@ export default function AIAssistantsPage() {
     }
     setAssistants(updated);
     setToStorage(STORAGE_KEYS.AI_ASSISTANTS, updated);
+    syncToBackend(updated);
     setIsModalOpen(false);
     setEditingAssistant(null);
   };
@@ -147,6 +164,7 @@ export default function AIAssistantsPage() {
     const updated = assistants.filter((a) => a.id !== id);
     setAssistants(updated);
     setToStorage(STORAGE_KEYS.AI_ASSISTANTS, updated);
+    syncToBackend(updated);
   };
 
   const filteredAssistants = assistants.filter((a) => {

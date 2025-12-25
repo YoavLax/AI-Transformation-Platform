@@ -15,6 +15,64 @@ export interface AIAssistant {
   created_at: string;
 }
 
+// Dashboard Types
+export interface DashboardStats {
+  active_ai_tools: number;
+  active_ai_tools_change: number;
+  monthly_spend: number;
+  monthly_spend_change: number;
+  copilot_acceptance_rate: number;
+  copilot_acceptance_rate_change: number;
+  teams_using_ai: number;
+  total_teams: number;
+  teams_change: number;
+}
+
+export interface DashboardMaturity {
+  level: number;
+  label: string;
+  overall_score: number;
+  radar_data: Array<{ subject: string; value: number; fullMark: number }>;
+  champions: number;
+  initiatives_in_progress: number;
+}
+
+export interface DashboardUseCases {
+  total: number;
+  in_progress: number;
+  completed: number;
+  approved: number;
+}
+
+export interface DashboardGovernance {
+  model_cards: number;
+  total_risks: number;
+  high_risks: number;
+}
+
+export interface DashboardValue {
+  total_investment: number;
+  total_returns: number;
+  roi_percentage: number;
+  tracked_kpis: number;
+}
+
+export interface DashboardActivity {
+  type: string;
+  title: string;
+  time: string;
+  status: 'pending' | 'completed' | 'warning';
+}
+
+export interface DashboardSummary {
+  stats: DashboardStats;
+  maturity: DashboardMaturity;
+  use_cases: DashboardUseCases;
+  governance: DashboardGovernance;
+  value: DashboardValue;
+  recent_activity: DashboardActivity[];
+}
+
 // AI Initiative Types
 export interface Risk {
   id?: string;
