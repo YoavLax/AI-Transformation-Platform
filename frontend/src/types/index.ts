@@ -84,17 +84,27 @@ export interface Risk {
   status?: 'open' | 'mitigated' | 'accepted';
 }
 
+export interface ActionItem {
+  id: string;
+  title: string;
+  completed: boolean;
+  assignee?: string;
+  due_date?: string;
+  created_at: string;
+}
+
 export interface AIInitiative {
   id: string;
   title: string;
   description: string;
   team: string;
   sponsor: string;
-  status: 'planning' | 'pilot' | 'rollout' | 'active' | 'on-hold' | 'completed';
+  status: 'todo' | 'in-progress' | 'done';
   start_date: string;
   target_date: string;
   ai_assistants: string[]; // IDs of AI assistants used
   objectives: string[];
+  action_items: ActionItem[];
   risks: Risk[];
   progress: number;
   created_at: string;

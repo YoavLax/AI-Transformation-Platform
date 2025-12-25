@@ -14,9 +14,7 @@ import {
   Badge,
   Modal,
   Progress,
-  Tabs,
 } from "@/components/ui";
-import { RiskHeatmap } from "@/components/charts";
 import {
   Rocket,
   Plus,
@@ -28,45 +26,36 @@ import {
   Users,
   CheckCircle2,
   Clock,
-  PauseCircle,
+  Circle,
+  CheckSquare,
+  Square,
 } from "lucide-react";
 import { getFromStorage, setToStorage, STORAGE_KEYS } from "@/lib/storage";
 import { formatDate, generateId } from "@/lib/utils";
-import type { AIInitiative, Risk } from "@/types";
+import type { AIInitiative, Risk, ActionItem } from "@/types";
 
 const STATUSES = [
-  { value: "planning", label: "Planning", icon: Calendar, color: "bg-gray-100 text-gray-700" },
-  { value: "pilot", label: "Pilot", icon: Clock, color: "bg-blue-100 text-blue-700" },
-  { value: "rollout", label: "Rollout", icon: Rocket, color: "bg-purple-100 text-purple-700" },
-  { value: "active", label: "Active", icon: CheckCircle2, color: "bg-green-100 text-green-700" },
-  { value: "on-hold", label: "On Hold", icon: PauseCircle, color: "bg-amber-100 text-amber-700" },
-  { value: "completed", label: "Completed", icon: CheckCircle2, color: "bg-emerald-100 text-emerald-700" },
-];
-
-const RISK_CATEGORIES = [
-  { value: "security", label: "Security" },
-  { value: "compliance", label: "Compliance" },
-  { value: "data-privacy", label: "Data Privacy" },
-  { value: "vendor-lock-in", label: "Vendor Lock-in" },
-  { value: "cost", label: "Cost" },
-  { value: "adoption", label: "Adoption" },
-];
-
-const RISK_SEVERITIES = [
-  { value: "low", label: "Low", color: "bg-green-100 text-green-700" },
-  { value: "medium", label: "Medium", color: "bg-yellow-100 text-yellow-700" },
-  { value: "high", label: "High", color: "bg-orange-100 text-orange-700" },
-  { value: "critical", label: "Critical", color: "bg-red-100 text-red-700" },
+  { value: "todo", label: "To Do", icon: Circle, color: "bg-gray-100 text-gray-700" },
+  { value: "in-progress", label: "In Progress", icon: Clock, color: "bg-blue-100 text-blue-700" },
+  { value: "done", label: "Done", icon: CheckCircle2, color: "bg-green-100 text-green-700" },
 ];
 
 const sampleInitiatives: AIInitiative[] = [];
+
+// Helper function to calculate progress from action items
+const calculateProgress = (actionItems: ActionItem[]): number => {
+  if (actionItems.length === 0) return 0;
+  const completed = actionItems.filter(item => item.completed).length;
+  return Math.round((completed / actionItems.length) * 100);
+};
 
 export default function InitiativesPage() {
   const [initiatives, setInitiatives] = useState<AIInitiative[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingInitiative, setEditingInitiative] = useState<AIInitiative | null>(null);
-  const [activeTab, setActiveTab] = useState("initiatives");
-  const [filterStatus, setFilterStatus] = useState<string>("all");
+  const [isActionItemModalOpen, setIsActionItemModalOpen] = useState(false);
+  const [currentInitiative, setCurrentInitiative] = useState<AIInitiative | null>(null);
+  const [draggedInitiative, setDraggedInitiative] = useState<AIInitiative | null>(null);
 
   useEffect(() => {
     const stored = getFromStorage<AIInitiative[]>(STORAGE_KEYS.AI_INITIATIVES, []);
@@ -76,23 +65,33 @@ export default function InitiativesPage() {
   const saveInitiative = (data: Partial<AIInitiative>) => {
     let updated: AIInitiative[];
     if (editingInitiative) {
-      updated = initiatives.map((i) =>
-        i.id === editingInitiative.id ? { ...i, ...data, updated_at: new Date().toISOString() } : i
-      );
+      updated = initiatives.map((i) => {
+        if (i.id === editingInitiative.id) {
+          const updatedData = { ...i, ...data, updated_at: new Date().toISOString() };
+          // Recalculate progress if action items changed
+          if (data.action_items) {
+            updatedData.progress = calculateProgress(data.action_items);
+          }
+          return updatedData;
+        }
+        return i;
+      });
     } else {
+      const actionItems = data.action_items || [];
       const newInitiative: AIInitiative = {
         id: generateId(),
         title: data.title || "",
         description: data.description || "",
         team: data.team || "",
         sponsor: data.sponsor || "",
-        status: data.status || "planning",
+        status: data.status || "todo",
         start_date: data.start_date || "",
         target_date: data.target_date || "",
         ai_assistants: data.ai_assistants || [],
         objectives: data.objectives || [],
+        action_items: actionItems,
         risks: data.risks || [],
-        progress: data.progress || 0,
+        progress: calculateProgress(actionItems),
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };
@@ -110,42 +109,108 @@ export default function InitiativesPage() {
     setToStorage(STORAGE_KEYS.AI_INITIATIVES, updated);
   };
 
-  const filteredInitiatives = initiatives.filter((i) => {
-    if (filterStatus !== "all" && i.status !== filterStatus) return false;
-    return true;
-  });
+  const updateInitiativeStatus = (id: string, newStatus: AIInitiative["status"]) => {
+    const updated = initiatives.map((i) =>
+      i.id === id ? { ...i, status: newStatus, updated_at: new Date().toISOString() } : i
+    );
+    setInitiatives(updated);
+    setToStorage(STORAGE_KEYS.AI_INITIATIVES, updated);
+  };
 
-  // Collect all risks for heatmap
-  const allRisks = initiatives.flatMap((i) =>
-    i.risks.map((r) => ({
-      ...r,
-      initiative: i.title,
-    }))
-  );
+  const handleDragStart = (initiative: AIInitiative) => {
+    setDraggedInitiative(initiative);
+  };
 
-  const riskHeatmapData = RISK_CATEGORIES.flatMap((cat) =>
-    RISK_SEVERITIES.map((sev) => ({
-      x: sev.label,
-      y: cat.label,
-      value: allRisks.filter((r) => r.category === cat.value && r.severity === sev.value).length * 25,
-    }))
-  ).filter((d) => d.value > 0);
+  const handleDragEnd = () => {
+    setDraggedInitiative(null);
+  };
 
-  const xLabels = RISK_SEVERITIES.map(s => s.label);
-  const yLabels = RISK_CATEGORIES.map(c => c.label);
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+  };
 
-  const activeCount = initiatives.filter((i) => i.status === "active").length;
-  const pilotCount = initiatives.filter((i) => i.status === "pilot").length;
-  const highRiskCount = allRisks.filter((r) => r.severity === "high" || r.severity === "critical").length;
-  const avgProgress = initiatives.length > 0
-    ? Math.round(initiatives.reduce((sum, i) => sum + i.progress, 0) / initiatives.length)
-    : 0;
+  const handleDrop = (newStatus: AIInitiative["status"]) => {
+    if (draggedInitiative && draggedInitiative.status !== newStatus) {
+      updateInitiativeStatus(draggedInitiative.id, newStatus);
+    }
+    setDraggedInitiative(null);
+  };
+
+  const toggleActionItem = (initiativeId: string, actionItemId: string) => {
+    const updated = initiatives.map((i) => {
+      if (i.id === initiativeId) {
+        const updatedActionItems = i.action_items.map((item) =>
+          item.id === actionItemId ? { ...item, completed: !item.completed } : item
+        );
+        const progress = calculateProgress(updatedActionItems);
+        return { ...i, action_items: updatedActionItems, progress, updated_at: new Date().toISOString() };
+      }
+      return i;
+    });
+    setInitiatives(updated);
+    setToStorage(STORAGE_KEYS.AI_INITIATIVES, updated);
+  };
+
+  const addActionItem = (initiativeId: string, title: string, assignee?: string, due_date?: string) => {
+    const updated = initiatives.map((i) => {
+      if (i.id === initiativeId) {
+        const newActionItem: ActionItem = {
+          id: generateId(),
+          title,
+          completed: false,
+          assignee,
+          due_date,
+          created_at: new Date().toISOString(),
+        };
+        const updatedActionItems = [...i.action_items, newActionItem];
+        const progress = calculateProgress(updatedActionItems);
+        return {
+          ...i,
+          action_items: updatedActionItems,
+          progress,
+          updated_at: new Date().toISOString(),
+        };
+      }
+      return i;
+    });
+    setInitiatives(updated);
+    setToStorage(STORAGE_KEYS.AI_INITIATIVES, updated);
+  };
+
+  const deleteActionItem = (initiativeId: string, actionItemId: string) => {
+    const updated = initiatives.map((i) => {
+      if (i.id === initiativeId) {
+        const updatedActionItems = i.action_items.filter((item) => item.id !== actionItemId);
+        const progress = calculateProgress(updatedActionItems);
+        return {
+          ...i,
+          action_items: updatedActionItems,
+          progress,
+          updated_at: new Date().toISOString(),
+        };
+      }
+      return i;
+    });
+    setInitiatives(updated);
+    setToStorage(STORAGE_KEYS.AI_INITIATIVES, updated);
+  };
+
+  const todoCount = initiatives.filter((i) => i.status === "todo").length;
+  const inProgressCount = initiatives.filter((i) => i.status === "in-progress").length;
+  const doneCount = initiatives.filter((i) => i.status === "done").length;
+  const totalInitiatives = initiatives.length;
+
+  const initiativesByStatus = {
+    todo: initiatives.filter((i) => i.status === "todo"),
+    "in-progress": initiatives.filter((i) => i.status === "in-progress"),
+    done: initiatives.filter((i) => i.status === "done"),
+  };
 
   return (
     <div>
       <PageHeader
         title="AI Initiatives"
-        description="Track AI projects with governance and risk management"
+        description="Track AI projects with swimlane board and action items"
         icon={Rocket}
         actions={
           <Button onClick={() => setIsModalOpen(true)}>
@@ -157,47 +222,13 @@ export default function InitiativesPage() {
 
       {/* Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        <StatCard title="Active Initiatives" value={activeCount.toString()} icon={Rocket} />
-        <StatCard title="In Pilot" value={pilotCount.toString()} icon={Clock} />
-        <StatCard
-          title="High/Critical Risks"
-          value={highRiskCount.toString()}
-          change={highRiskCount > 0 ? -1 : 1}
-          changeLabel={highRiskCount > 0 ? "needs attention" : "all clear"}
-          icon={AlertTriangle}
-        />
-        <StatCard title="Avg Progress" value={`${avgProgress}%`} icon={CheckCircle2} />
+        <StatCard title="To Do" value={todoCount.toString()} icon={Circle} />
+        <StatCard title="In Progress" value={inProgressCount.toString()} icon={Clock} />
+        <StatCard title="Done" value={doneCount.toString()} icon={CheckCircle2} />
+        <StatCard title="Total Action Items" value={totalInitiatives.toString()} icon={Rocket} />
       </div>
 
-      <Tabs
-        tabs={[
-          { id: "initiatives", label: "Initiatives" },
-          { id: "risks", label: "Risk Overview" },
-        ]}
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
-        className="mb-6"
-      />
-
-      {activeTab === "initiatives" && (
-        <>
-          {/* Filters */}
-          <div className="flex flex-wrap gap-4 mb-6">
-            <Select
-              value={filterStatus}
-              onChange={(e) => setFilterStatus(e.target.value)}
-              className="w-48"
-            >
-              <option value="all">All Statuses</option>
-              {STATUSES.map((status) => (
-                <option key={status.value} value={status.value}>
-                  {status.label}
-                </option>
-              ))}
-            </Select>
-          </div>
-
-          {filteredInitiatives.length === 0 ? (
+      {initiatives.length === 0 ? (
             <EmptyState
               icon={Rocket}
               title="No initiatives found"
@@ -210,173 +241,64 @@ export default function InitiativesPage() {
               }
             />
           ) : (
-            <div className="space-y-6">
-              {filteredInitiatives.map((initiative) => {
-                const statusConfig = STATUSES.find((s) => s.value === initiative.status);
-                const StatusIcon = statusConfig?.icon || Clock;
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              {STATUSES.map((status) => {
+                const statusInitiatives = initiativesByStatus[status.value as keyof typeof initiativesByStatus];
+                const StatusIcon = status.icon;
+                const isDraggedOver = draggedInitiative?.status !== status.value;
+                
                 return (
-                  <Card key={initiative.id}>
-                    <CardContent className="pt-6">
-                      <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-3 mb-2">
-                            <h3 className="text-lg font-semibold">{initiative.title}</h3>
-                            <Badge className={statusConfig?.color}>
-                              <StatusIcon className="w-3 h-3 mr-1" />
-                              {statusConfig?.label}
-                            </Badge>
-                          </div>
-                          <p className="text-gray-600 mb-4">{initiative.description}</p>
-
-                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm mb-4">
-                            <div>
-                              <span className="text-gray-500">Team</span>
-                              <p className="font-medium">{initiative.team}</p>
-                            </div>
-                            <div>
-                              <span className="text-gray-500">Sponsor</span>
-                              <p className="font-medium">{initiative.sponsor}</p>
-                            </div>
-                            <div>
-                              <span className="text-gray-500">Start Date</span>
-                              <p className="font-medium">{formatDate(initiative.start_date)}</p>
-                            </div>
-                            <div>
-                              <span className="text-gray-500">Target Date</span>
-                              <p className="font-medium">{formatDate(initiative.target_date)}</p>
-                            </div>
-                          </div>
-
-                          <div className="mb-4">
-                            <div className="flex justify-between text-sm mb-1">
-                              <span className="text-gray-500">Progress</span>
-                              <span className="font-medium">{initiative.progress}%</span>
-                            </div>
-                            <Progress value={initiative.progress} className="h-2" />
-                          </div>
-
-                          {/* Objectives */}
-                          <div className="mb-4">
-                            <h4 className="text-sm font-medium text-gray-700 mb-2">Objectives</h4>
-                            <ul className="text-sm text-gray-600 space-y-1">
-                              {initiative.objectives.map((obj, i) => (
-                                <li key={i} className="flex items-start gap-2">
-                                  <CheckCircle2 className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" />
-                                  {obj}
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-
-                          {/* Risks */}
-                          {initiative.risks.length > 0 && (
-                            <div>
-                              <h4 className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
-                                <Shield className="w-4 h-4" />
-                                Risks ({initiative.risks.length})
-                              </h4>
-                              <div className="flex flex-wrap gap-2">
-                                {initiative.risks.map((risk) => {
-                                  const sevConfig = RISK_SEVERITIES.find((s) => s.value === risk.severity);
-                                  return (
-                                    <Badge key={risk.id} className={sevConfig?.color}>
-                                      {RISK_CATEGORIES.find((c) => c.value === risk.category)?.label}: {risk.severity}
-                                    </Badge>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="flex lg:flex-col gap-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              setEditingInitiative(initiative);
-                              setIsModalOpen(true);
-                            }}
-                          >
-                            <Edit2 className="w-4 h-4 mr-1" />
-                            Edit
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="text-red-600 hover:bg-red-50"
-                            onClick={() => {
-                              if (confirm("Delete this initiative?")) {
-                                deleteInitiative(initiative.id);
-                              }
-                            }}
-                          >
-                            <Trash2 className="w-4 h-4 mr-1" />
-                            Delete
-                          </Button>
-                        </div>
+                  <div 
+                    key={status.value} 
+                    className="flex flex-col"
+                    onDragOver={handleDragOver}
+                    onDrop={() => handleDrop(status.value as AIInitiative["status"])}
+                  >
+                    <div className={`p-4 rounded-t-lg border-b-2 ${status.color} font-semibold flex items-center justify-between`}>
+                      <div className="flex items-center gap-2">
+                        <StatusIcon className="w-5 h-5" />
+                        {status.label}
                       </div>
-                    </CardContent>
-                  </Card>
+                      <Badge className="bg-white text-gray-700">{statusInitiatives.length}</Badge>
+                    </div>
+                    <div 
+                      className={`flex-1 bg-gray-50 p-4 rounded-b-lg space-y-4 min-h-[400px] transition-colors ${
+                        draggedInitiative && isDraggedOver ? 'bg-blue-50 border-2 border-dashed border-blue-300' : ''
+                      }`}
+                    >
+                      {statusInitiatives.map((initiative) => (
+                        <InitiativeCard
+                          key={initiative.id}
+                          initiative={initiative}
+                          onEdit={(init) => {
+                            setEditingInitiative(init);
+                            setIsModalOpen(true);
+                          }}
+                          onDelete={deleteInitiative}
+                          onToggleActionItem={toggleActionItem}
+                          onAddActionItem={(init) => {
+                            setCurrentInitiative(init);
+                            setIsActionItemModalOpen(true);
+                          }}
+                          onDeleteActionItem={deleteActionItem}
+                          onDragStart={handleDragStart}
+                          onDragEnd={handleDragEnd}
+                          isDragging={draggedInitiative?.id === initiative.id}
+                        />
+                      ))}
+                      {statusInitiatives.length === 0 && draggedInitiative && isDraggedOver && (
+                        <div className="text-center text-gray-400 py-8">
+                          Drop here to move to {status.label}
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 );
               })}
             </div>
           )}
-        </>
-      )}
 
-      {activeTab === "risks" && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            <Card>
-              <CardHeader>
-                <CardTitle>Risk Heatmap</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {riskHeatmapData.length > 0 ? (
-                  <RiskHeatmap data={riskHeatmapData} xLabels={xLabels} yLabels={yLabels} />
-                ) : (
-                  <p className="text-gray-500 text-center py-8">No risks recorded yet</p>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>All Risks</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {allRisks.length === 0 ? (
-                  <p className="text-gray-500 text-center py-8">No risks recorded yet</p>
-                ) : (
-                  <div className="space-y-4 max-h-96 overflow-y-auto">
-                    {allRisks.map((risk, i) => {
-                      const sevConfig = RISK_SEVERITIES.find((s) => s.value === risk.severity);
-                      return (
-                        <div key={i} className="p-3 border rounded-lg">
-                          <div className="flex items-center justify-between mb-2">
-                            <Badge className={sevConfig?.color}>{risk.severity}</Badge>
-                            <span className="text-xs text-gray-500">{risk.initiative}</span>
-                          </div>
-                          <p className="text-sm font-medium">
-                            {RISK_CATEGORIES.find((c) => c.value === risk.category)?.label}
-                          </p>
-                          <p className="text-sm text-gray-600 mt-1">{risk.description}</p>
-                          {risk.mitigation && (
-                            <p className="text-xs text-gray-500 mt-2">
-                              <strong>Mitigation:</strong> {risk.mitigation}
-                            </p>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-      )}
-
-      {/* Add/Edit Modal */}
+      {/* Add/Edit Initiative Modal */}
       <InitiativeModal
         isOpen={isModalOpen}
         onClose={() => {
@@ -386,7 +308,192 @@ export default function InitiativesPage() {
         onSave={saveInitiative}
         initiative={editingInitiative}
       />
+
+      {/* Add Action Item Modal */}
+      <ActionItemModal
+        isOpen={isActionItemModalOpen}
+        onClose={() => {
+          setIsActionItemModalOpen(false);
+          setCurrentInitiative(null);
+        }}
+        onSave={(title, assignee, due_date) => {
+          if (currentInitiative) {
+            addActionItem(currentInitiative.id, title, assignee, due_date);
+          }
+          setIsActionItemModalOpen(false);
+          setCurrentInitiative(null);
+        }}
+      />
     </div>
+  );
+}
+
+function InitiativeCard({
+  initiative,
+  onEdit,
+  onDelete,
+  onToggleActionItem,
+  onAddActionItem,
+  onDeleteActionItem,
+  onDragStart,
+  onDragEnd,
+  isDragging,
+}: {
+  initiative: AIInitiative;
+  onEdit: (initiative: AIInitiative) => void;
+  onDelete: (id: string) => void;
+  onToggleActionItem: (initiativeId: string, actionItemId: string) => void;
+  onAddActionItem: (initiative: AIInitiative) => void;
+  onDeleteActionItem: (initiativeId: string, actionItemId: string) => void;
+  onDragStart: (initiative: AIInitiative) => void;
+  onDragEnd: () => void;
+  isDragging: boolean;
+}) {
+  const completedActions = initiative.action_items.filter((item) => item.completed).length;
+  const totalActions = initiative.action_items.length;
+
+  return (
+    <Card 
+      className={`hover:shadow-md transition-all cursor-move group ${isDragging ? 'opacity-50 scale-95' : ''}`}
+      draggable
+      onDragStart={() => onDragStart(initiative)}
+      onDragEnd={onDragEnd}
+    >
+      <CardContent className="p-4">
+        <div className="flex items-start justify-between mb-3">
+          <h4 className="font-semibold text-sm flex-1 pr-2">{initiative.title}</h4>
+          <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onEdit(initiative);
+              }}
+              className="p-1 hover:bg-gray-100 rounded"
+              title="Edit"
+            >
+              <Edit2 className="w-3 h-3 text-gray-600" />
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                if (confirm("Delete this initiative?")) {
+                  onDelete(initiative.id);
+                }
+              }}
+              className="p-1 hover:bg-red-50 rounded"
+              title="Delete"
+            >
+              <Trash2 className="w-3 h-3 text-red-600" />
+            </button>
+          </div>
+        </div>
+
+        <p className="text-xs text-gray-600 mb-3 line-clamp-2">{initiative.description}</p>
+
+        <div className="space-y-2 text-xs text-gray-500 mb-3">
+          <div className="flex items-center gap-2">
+            <Users className="w-3 h-3" />
+            <span>{initiative.team}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Calendar className="w-3 h-3" />
+            <span>{formatDate(initiative.target_date)}</span>
+          </div>
+        </div>
+
+        {/* Action Items */}
+        <div className="mb-3">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-medium text-gray-700">
+              Action Items ({completedActions}/{totalActions})
+            </span>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onAddActionItem(initiative);
+              }}
+              className="text-blue-600 hover:text-blue-700"
+              title="Add action item"
+            >
+              <Plus className="w-3 h-3" />
+            </button>
+          </div>
+          <div className="space-y-1 max-h-32 overflow-y-auto">
+            {initiative.action_items.slice(0, 3).map((item) => (
+              <div
+                key={item.id}
+                className="flex items-start gap-2 text-xs group/item"
+              >
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onToggleActionItem(initiative.id, item.id);
+                  }}
+                  className="mt-0.5"
+                >
+                  {item.completed ? (
+                    <CheckSquare className="w-3 h-3 text-green-600" />
+                  ) : (
+                    <Square className="w-3 h-3 text-gray-400" />
+                  )}
+                </button>
+                <span
+                  className={`flex-1 ${item.completed ? "line-through text-gray-400" : "text-gray-700"}`}
+                >
+                  {item.title}
+                </span>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDeleteActionItem(initiative.id, item.id);
+                  }}
+                  className="opacity-0 group-hover/item:opacity-100"
+                >
+                  <Trash2 className="w-3 h-3 text-red-500" />
+                </button>
+              </div>
+            ))}
+            {initiative.action_items.length > 3 && (
+              <p className="text-xs text-gray-400 italic">
+                +{initiative.action_items.length - 3} more
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* Risks */}
+        {initiative.risks.length > 0 && (
+          <div className="mb-3">
+            <div className="flex items-center gap-1 text-xs text-gray-700 mb-1">
+              <Shield className="w-3 h-3" />
+              <span className="font-medium">Risks: {initiative.risks.length}</span>
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {initiative.risks.slice(0, 2).map((risk) => {
+                const sevConfig = RISK_SEVERITIES.find((s) => s.value === risk.severity);
+                return (
+                  <Badge key={risk.id} className={`${sevConfig?.color} text-xs py-0 px-1`}>
+                    {risk.severity}
+                  </Badge>
+                );
+              })}
+              {initiative.risks.length > 2 && (
+                <span className="text-xs text-gray-400">+{initiative.risks.length - 2}</span>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Progress */}
+        <div>
+          <div className="flex justify-between text-xs mb-1">
+            <span className="text-gray-500">Progress (auto)</span>
+            <span className="font-medium">{initiative.progress}%</span>
+          </div>
+          <Progress value={initiative.progress} className="h-1" />
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -412,11 +519,12 @@ function InitiativeModal({
         description: "",
         team: "",
         sponsor: "",
-        status: "planning",
+        status: "todo",
         start_date: "",
         target_date: "",
         ai_assistants: [],
         objectives: [],
+        action_items: [],
         risks: [],
         progress: 0,
       });
@@ -459,18 +567,7 @@ function InitiativeModal({
           />
         </div>
 
-        <div className="grid grid-cols-3 gap-4">
-          <Select
-            label="Status"
-            value={formData.status || "planning"}
-            onChange={(e) => setFormData({ ...formData, status: e.target.value as AIInitiative["status"] })}
-          >
-            {STATUSES.map((status) => (
-              <option key={status.value} value={status.value}>
-                {status.label}
-              </option>
-            ))}
-          </Select>
+        <div className="grid grid-cols-2 gap-4">
           <Input
             label="Start Date"
             type="date"
@@ -485,14 +582,17 @@ function InitiativeModal({
           />
         </div>
 
-        <Input
-          label="Progress (%)"
-          type="number"
-          value={formData.progress || 0}
-          onChange={(e) => setFormData({ ...formData, progress: parseInt(e.target.value) })}
-          min={0}
-          max={100}
-        />
+        <Select
+          label="Status"
+          value={formData.status || "todo"}
+          onChange={(e) => setFormData({ ...formData, status: e.target.value as AIInitiative["status"] })}
+        >
+          {STATUSES.map((status) => (
+            <option key={status.value} value={status.value}>
+              {status.label}
+            </option>
+          ))}
+        </Select>
 
         <Textarea
           label="Objectives (one per line)"
@@ -512,6 +612,63 @@ function InitiativeModal({
             Cancel
           </Button>
           <Button type="submit">{initiative ? "Update" : "Create"} Initiative</Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function ActionItemModal({
+  isOpen,
+  onClose,
+  onSave,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  onSave: (title: string, assignee?: string, due_date?: string) => void;
+}) {
+  const [title, setTitle] = useState("");
+  const [assignee, setAssignee] = useState("");
+  const [dueDate, setDueDate] = useState("");
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onSave(title, assignee || undefined, dueDate || undefined);
+    setTitle("");
+    setAssignee("");
+    setDueDate("");
+  };
+
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} title="Add Action Item">
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <Input
+          label="Action Item"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder="What needs to be done?"
+          required
+        />
+
+        <Input
+          label="Assignee (optional)"
+          value={assignee}
+          onChange={(e) => setAssignee(e.target.value)}
+          placeholder="Who is responsible?"
+        />
+
+        <Input
+          label="Due Date (optional)"
+          type="date"
+          value={dueDate}
+          onChange={(e) => setDueDate(e.target.value)}
+        />
+
+        <div className="flex justify-end gap-3 pt-4">
+          <Button type="button" variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit">Add Action Item</Button>
         </div>
       </form>
     </Modal>

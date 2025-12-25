@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routes import assessments, use_cases, governance, value_tracking, blueprints, learning, dashboard, assistants, metrics
+from routes import assessments, use_cases, governance, value_tracking, blueprints, learning, dashboard, assistants, metrics, initiatives
 
 app = FastAPI(
     title="AI-OS API",
@@ -27,6 +27,7 @@ app.include_router(governance.router, prefix="/api/governance", tags=["Governanc
 app.include_router(value_tracking.router, prefix="/api/value", tags=["Value Tracking"])
 app.include_router(blueprints.router, prefix="/api/blueprints", tags=["Blueprints"])
 app.include_router(learning.router, prefix="/api/learning", tags=["Learning"])
+app.include_router(initiatives.router, prefix="/api/initiatives", tags=["Initiatives"])
 
 
 @app.get("/")
