@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
+import Image from "next/image";
 import {
   LayoutDashboard,
   Bot,
@@ -62,14 +63,14 @@ export function Sidebar() {
       >
         <div className="flex flex-col h-full">
           {/* Logo */}
-          <div className="flex items-center gap-3 px-6 py-6 border-b border-gray-800">
-            <div className="relative w-10 h-10 bg-gradient-to-br from-violet-500 via-purple-600 to-indigo-700 rounded-lg flex items-center justify-center shadow-lg shadow-purple-500/30">
-              <Bot className="w-5 h-5 text-white" />
-              <Sparkles className="absolute -top-1 -right-1 w-4 h-4 text-yellow-400 animate-pulse" />
-            </div>
-            <div>
-              <h1 className="font-semibold text-sm leading-tight text-white">The AI Transformation<br />Platform</h1>
-            </div>
+          <div className="relative w-60 h-55 border-b border-gray-800">
+            <Image 
+              src="/logo.png" 
+              alt="AI-OS Logo" 
+              fill
+              className="object-cover"
+              priority
+            />
           </div>
 
           {/* Navigation */}

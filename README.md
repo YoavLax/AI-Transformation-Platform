@@ -1,6 +1,10 @@
-# The AI Transformation Platform
+<div align="center">
+  <img src="frontend/public/logo.png" alt="AI Transformation Platform Logo" width="200"/>
+  
+  # The AI Transformation Platform
+</div>
 
-A comprehensive web-based platform for enterprise AI transformation, designed specifically for engineering departments and organizations looking to drive AI adoption at scale. The platform provides tools for maturity assessment, AI culture building, use case prioritization, governance, value tracking, architecture blueprints, and learning management.
+A comprehensive web-based platform for enterprise AI transformation leaders, designed specifically for engineering departments and organizations looking to drive AI adoption at scale. The platform provides tools for maturity assessment, AI culture building, use case prioritization, governance, value tracking, architecture blueprints, and learning management.
 
 ## ✨ Vision
 
