@@ -1,14 +1,15 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
 from typing import List, Optional
 from datetime import datetime
+from sqlalchemy.orm import Session
 import uuid
 
+from database import get_db
+from db_models import UseCaseModel, UseCaseStatus as DBUseCaseStatus
+from repositories import UseCaseRepository
 from models import UseCase, UseCaseCreate, UseCaseStatus, DataAvailability
 
 router = APIRouter()
-
-# In-memory storage
-use_cases_db: dict[str, UseCase] = {}
 
 
 @router.get("/", response_model=List[UseCase])
@@ -16,43 +17,71 @@ async def get_use_cases(
     status: Optional[UseCaseStatus] = None,
     department: Optional[str] = None,
     min_impact: Optional[float] = Query(None, ge=0, le=10),
-    min_feasibility: Optional[float] = Query(None, ge=0, le=10)
+    min_feasibility: Optional[float] = Query(None, ge=0, le=10),
+    db: Session = Depends(get_db)
 ):
     """Get all use cases with optional filters"""
-    results = list(use_cases_db.values())
+    repo = UseCaseRepository(db)
+    db_status = DBUseCaseStatus(status.value) if status else None
+    results = repo.get_filtered(db_status, department, min_impact, min_feasibility)
     
-    if status:
-        results = [uc for uc in results if uc.status == status]
-    
-    if department:
-        results = [uc for uc in results 
-                   if uc.department.lower() == department.lower()]
-    
-    if min_impact is not None:
-        results = [uc for uc in results if uc.impact_score >= min_impact]
-    
-    if min_feasibility is not None:
-        results = [uc for uc in results if uc.feasibility_score >= min_feasibility]
-    
-    return results
+    return [
+        UseCase(
+            id=uc.id,
+            title=uc.title,
+            description=uc.description,
+            department=uc.department,
+            problem_statement=uc.problem_statement,
+            expected_outcomes=uc.expected_outcomes,
+            data_availability=DataAvailability(uc.data_availability.value),
+            impact_score=uc.impact_score,
+            feasibility_score=uc.feasibility_score,
+            risk_score=uc.risk_score,
+            timeline_estimate=uc.timeline_estimate,
+            status=UseCaseStatus(uc.status.value),
+            created_at=uc.created_at
+        )
+        for uc in results
+    ]
 
 
 @router.get("/prioritized", response_model=List[UseCase])
-async def get_prioritized_use_cases():
+async def get_prioritized_use_cases(db: Session = Depends(get_db)):
     """Get use cases sorted by priority (impact * feasibility / risk)"""
-    cases = list(use_cases_db.values())
+    repo = UseCaseRepository(db)
+    cases = repo.get_all()
     
-    def priority_score(uc: UseCase) -> float:
+    def priority_score(uc: UseCaseModel) -> float:
         risk_factor = max(uc.risk_score, 0.1)  # Avoid division by zero
         return (uc.impact_score * uc.feasibility_score) / risk_factor
     
-    return sorted(cases, key=priority_score, reverse=True)
+    sorted_cases = sorted(cases, key=priority_score, reverse=True)
+    
+    return [
+        UseCase(
+            id=uc.id,
+            title=uc.title,
+            description=uc.description,
+            department=uc.department,
+            problem_statement=uc.problem_statement,
+            expected_outcomes=uc.expected_outcomes,
+            data_availability=DataAvailability(uc.data_availability.value),
+            impact_score=uc.impact_score,
+            feasibility_score=uc.feasibility_score,
+            risk_score=uc.risk_score,
+            timeline_estimate=uc.timeline_estimate,
+            status=UseCaseStatus(uc.status.value),
+            created_at=uc.created_at
+        )
+        for uc in sorted_cases
+    ]
 
 
 @router.get("/matrix")
-async def get_matrix_data():
+async def get_matrix_data(db: Session = Depends(get_db)):
     """Get use cases formatted for 2x2 matrix visualization"""
-    cases = list(use_cases_db.values())
+    repo = UseCaseRepository(db)
+    cases = repo.get_all()
     
     return [
         {
@@ -61,7 +90,7 @@ async def get_matrix_data():
             "x": uc.feasibility_score,  # x-axis: feasibility
             "y": uc.impact_score,       # y-axis: impact
             "risk": uc.risk_score,
-            "status": uc.status,
+            "status": uc.status.value,
             "department": uc.department
         }
         for uc in cases
@@ -69,95 +98,136 @@ async def get_matrix_data():
 
 
 @router.get("/{usecase_id}", response_model=UseCase)
-async def get_use_case(usecase_id: str):
+async def get_use_case(usecase_id: str, db: Session = Depends(get_db)):
     """Get a specific use case by ID"""
-    if usecase_id not in use_cases_db:
+    repo = UseCaseRepository(db)
+    uc = repo.get(usecase_id)
+    if not uc:
         raise HTTPException(status_code=404, detail="Use case not found")
-    return use_cases_db[usecase_id]
+    return UseCase(
+        id=uc.id,
+        title=uc.title,
+        description=uc.description,
+        department=uc.department,
+        problem_statement=uc.problem_statement,
+        expected_outcomes=uc.expected_outcomes,
+        data_availability=DataAvailability(uc.data_availability.value),
+        impact_score=uc.impact_score,
+        feasibility_score=uc.feasibility_score,
+        risk_score=uc.risk_score,
+        timeline_estimate=uc.timeline_estimate,
+        status=UseCaseStatus(uc.status.value),
+        created_at=uc.created_at
+    )
 
 
 @router.post("/", response_model=UseCase)
-async def create_use_case(data: UseCaseCreate):
+async def create_use_case(data: UseCaseCreate, db: Session = Depends(get_db)):
     """Create a new use case"""
+    repo = UseCaseRepository(db)
     usecase_id = str(uuid.uuid4())
     
-    use_case = UseCase(
+    db_use_case = UseCaseModel(
         id=usecase_id,
         title=data.title,
         description=data.description,
         department=data.department,
         problem_statement=data.problem_statement,
         expected_outcomes=data.expected_outcomes,
-        data_availability=data.data_availability,
+        data_availability=DBUseCaseStatus(data.data_availability.value) if hasattr(data.data_availability, 'value') else data.data_availability,
         impact_score=data.impact_score,
         feasibility_score=data.feasibility_score,
         risk_score=data.risk_score,
         timeline_estimate=data.timeline_estimate,
-        status=UseCaseStatus.draft,
+        status=DBUseCaseStatus.draft,
         created_at=datetime.utcnow()
     )
     
-    use_cases_db[usecase_id] = use_case
-    return use_case
+    repo.create(db_use_case)
+    
+    return UseCase(
+        id=db_use_case.id,
+        title=db_use_case.title,
+        description=db_use_case.description,
+        department=db_use_case.department,
+        problem_statement=db_use_case.problem_statement,
+        expected_outcomes=db_use_case.expected_outcomes,
+        data_availability=data.data_availability,
+        impact_score=db_use_case.impact_score,
+        feasibility_score=db_use_case.feasibility_score,
+        risk_score=db_use_case.risk_score,
+        timeline_estimate=db_use_case.timeline_estimate,
+        status=UseCaseStatus.draft,
+        created_at=db_use_case.created_at
+    )
 
 
 @router.put("/{usecase_id}", response_model=UseCase)
-async def update_use_case(usecase_id: str, data: UseCaseCreate):
+async def update_use_case(usecase_id: str, data: UseCaseCreate, db: Session = Depends(get_db)):
     """Update an existing use case"""
-    if usecase_id not in use_cases_db:
+    repo = UseCaseRepository(db)
+    existing = repo.get(usecase_id)
+    if not existing:
         raise HTTPException(status_code=404, detail="Use case not found")
     
-    existing = use_cases_db[usecase_id]
+    existing.title = data.title
+    existing.description = data.description
+    existing.department = data.department
+    existing.problem_statement = data.problem_statement
+    existing.expected_outcomes = data.expected_outcomes
+    existing.data_availability = data.data_availability
+    existing.impact_score = data.impact_score
+    existing.feasibility_score = data.feasibility_score
+    existing.risk_score = data.risk_score
+    existing.timeline_estimate = data.timeline_estimate
     
-    updated = UseCase(
-        id=usecase_id,
-        title=data.title,
-        description=data.description,
-        department=data.department,
-        problem_statement=data.problem_statement,
-        expected_outcomes=data.expected_outcomes,
-        data_availability=data.data_availability,
-        impact_score=data.impact_score,
-        feasibility_score=data.feasibility_score,
-        risk_score=data.risk_score,
-        timeline_estimate=data.timeline_estimate,
-        status=existing.status,
+    repo.update(existing)
+    
+    return UseCase(
+        id=existing.id,
+        title=existing.title,
+        description=existing.description,
+        department=existing.department,
+        problem_statement=existing.problem_statement,
+        expected_outcomes=existing.expected_outcomes,
+        data_availability=DataAvailability(existing.data_availability.value),
+        impact_score=existing.impact_score,
+        feasibility_score=existing.feasibility_score,
+        risk_score=existing.risk_score,
+        timeline_estimate=existing.timeline_estimate,
+        status=UseCaseStatus(existing.status.value),
         created_at=existing.created_at
     )
-    
-    use_cases_db[usecase_id] = updated
-    return updated
 
 
 @router.patch("/{usecase_id}/status")
-async def update_use_case_status(usecase_id: str, status: UseCaseStatus):
+async def update_use_case_status(usecase_id: str, status: UseCaseStatus, db: Session = Depends(get_db)):
     """Update the status of a use case"""
-    if usecase_id not in use_cases_db:
+    repo = UseCaseRepository(db)
+    db_status = DBUseCaseStatus(status.value)
+    uc = repo.update_status(usecase_id, db_status)
+    if not uc:
         raise HTTPException(status_code=404, detail="Use case not found")
     
-    use_case = use_cases_db[usecase_id]
-    use_case = UseCase(
-        **{**use_case.model_dump(), "status": status}
-    )
-    use_cases_db[usecase_id] = use_case
-    
-    return {"message": f"Status updated to {status}", "use_case": use_case}
+    return {"message": f"Status updated to {status.value}", "use_case_id": uc.id}
 
 
 @router.delete("/{usecase_id}")
-async def delete_use_case(usecase_id: str):
+async def delete_use_case(usecase_id: str, db: Session = Depends(get_db)):
     """Delete a use case"""
-    if usecase_id not in use_cases_db:
+    repo = UseCaseRepository(db)
+    if not repo.exists(usecase_id):
         raise HTTPException(status_code=404, detail="Use case not found")
     
-    del use_cases_db[usecase_id]
+    repo.delete(usecase_id)
     return {"message": "Use case deleted successfully"}
 
 
 @router.get("/stats/summary")
-async def get_use_case_stats():
+async def get_use_case_stats(db: Session = Depends(get_db)):
     """Get summary statistics for use cases"""
-    cases = list(use_cases_db.values())
+    repo = UseCaseRepository(db)
+    cases = repo.get_all()
     
     if not cases:
         return {

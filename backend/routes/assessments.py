@@ -1,14 +1,15 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from typing import List
 from datetime import datetime
+from sqlalchemy.orm import Session
 import uuid
 
+from database import get_db
+from db_models import AssessmentModel
+from repositories import AssessmentRepository
 from models import Assessment, AssessmentCreate, AssessmentScores
 
 router = APIRouter()
-
-# In-memory storage (simulating localStorage on backend)
-assessments_db: dict[str, Assessment] = {}
 
 
 def generate_recommendations(scores: AssessmentScores) -> List[str]:
@@ -48,74 +49,121 @@ def generate_recommendations(scores: AssessmentScores) -> List[str]:
 
 
 @router.get("/", response_model=List[Assessment])
-async def get_assessments():
+async def get_assessments(db: Session = Depends(get_db)):
     """Get all assessments"""
-    return list(assessments_db.values())
+    repo = AssessmentRepository(db)
+    assessments = repo.get_all()
+    return [
+        Assessment(
+            id=a.id,
+            organization_id=a.organization_id,
+            organization_name=a.organization_name,
+            date=a.date,
+            scores=AssessmentScores(**a.scores),
+            recommendations=a.recommendations or []
+        )
+        for a in assessments
+    ]
 
 
 @router.get("/{assessment_id}", response_model=Assessment)
-async def get_assessment(assessment_id: str):
+async def get_assessment(assessment_id: str, db: Session = Depends(get_db)):
     """Get a specific assessment by ID"""
-    if assessment_id not in assessments_db:
+    repo = AssessmentRepository(db)
+    a = repo.get(assessment_id)
+    if not a:
         raise HTTPException(status_code=404, detail="Assessment not found")
-    return assessments_db[assessment_id]
+    return Assessment(
+        id=a.id,
+        organization_id=a.organization_id,
+        organization_name=a.organization_name,
+        date=a.date,
+        scores=AssessmentScores(**a.scores),
+        recommendations=a.recommendations or []
+    )
 
 
 @router.post("/", response_model=Assessment)
-async def create_assessment(data: AssessmentCreate):
+async def create_assessment(data: AssessmentCreate, db: Session = Depends(get_db)):
     """Create a new assessment"""
+    repo = AssessmentRepository(db)
+    
     assessment_id = str(uuid.uuid4())
     org_id = str(uuid.uuid4())
-    
     recommendations = generate_recommendations(data.scores)
     
-    assessment = Assessment(
+    db_assessment = AssessmentModel(
         id=assessment_id,
         organization_id=org_id,
         organization_name=data.organization_name,
         date=datetime.utcnow(),
-        scores=data.scores,
+        scores=data.scores.model_dump(),
         recommendations=recommendations
     )
     
-    assessments_db[assessment_id] = assessment
-    return assessment
+    repo.create(db_assessment)
+    
+    return Assessment(
+        id=db_assessment.id,
+        organization_id=db_assessment.organization_id,
+        organization_name=db_assessment.organization_name,
+        date=db_assessment.date,
+        scores=data.scores,
+        recommendations=recommendations
+    )
 
 
 @router.put("/{assessment_id}", response_model=Assessment)
-async def update_assessment(assessment_id: str, data: AssessmentCreate):
+async def update_assessment(assessment_id: str, data: AssessmentCreate, db: Session = Depends(get_db)):
     """Update an existing assessment"""
-    if assessment_id not in assessments_db:
+    repo = AssessmentRepository(db)
+    existing = repo.get(assessment_id)
+    if not existing:
         raise HTTPException(status_code=404, detail="Assessment not found")
     
-    existing = assessments_db[assessment_id]
     recommendations = generate_recommendations(data.scores)
     
-    updated = Assessment(
-        id=assessment_id,
+    existing.organization_name = data.organization_name
+    existing.date = datetime.utcnow()
+    existing.scores = data.scores.model_dump()
+    existing.recommendations = recommendations
+    
+    repo.update(existing)
+    
+    return Assessment(
+        id=existing.id,
         organization_id=existing.organization_id,
-        organization_name=data.organization_name,
-        date=datetime.utcnow(),
+        organization_name=existing.organization_name,
+        date=existing.date,
         scores=data.scores,
         recommendations=recommendations
     )
-    
-    assessments_db[assessment_id] = updated
-    return updated
 
 
 @router.delete("/{assessment_id}")
-async def delete_assessment(assessment_id: str):
+async def delete_assessment(assessment_id: str, db: Session = Depends(get_db)):
     """Delete an assessment"""
-    if assessment_id not in assessments_db:
+    repo = AssessmentRepository(db)
+    if not repo.exists(assessment_id):
         raise HTTPException(status_code=404, detail="Assessment not found")
     
-    del assessments_db[assessment_id]
+    repo.delete(assessment_id)
     return {"message": "Assessment deleted successfully"}
 
 
 @router.get("/organization/{org_name}", response_model=List[Assessment])
-async def get_assessments_by_organization(org_name: str):
+async def get_assessments_by_organization(org_name: str, db: Session = Depends(get_db)):
     """Get all assessments for a specific organization"""
-    return [a for a in assessments_db.values() 
-            if a.organization_name.lower() == org_name.lower()]
+    repo = AssessmentRepository(db)
+    assessments = repo.get_by_organization(org_name)
+    return [
+        Assessment(
+            id=a.id,
+            organization_id=a.organization_id,
+            organization_name=a.organization_name,
+            date=a.date,
+            scores=AssessmentScores(**a.scores),
+            recommendations=a.recommendations or []
+        )
+        for a in assessments
+    ]

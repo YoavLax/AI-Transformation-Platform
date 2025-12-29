@@ -1,13 +1,15 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from typing import List, Optional
 from datetime import datetime
+from sqlalchemy.orm import Session
 from pydantic import BaseModel
 import uuid
 
-router = APIRouter()
+from database import get_db
+from db_models import AIAssistantModel, AssistantStatus as DBAssistantStatus
+from repositories import AssistantRepository
 
-# In-memory storage (simulating the frontend localStorage)
-assistants_db: dict[str, dict] = {}
+router = APIRouter()
 
 
 class AIAssistantCreate(BaseModel):
@@ -30,129 +32,198 @@ class AIAssistant(AIAssistantCreate):
 
 
 @router.get("/", response_model=List[AIAssistant])
-async def get_assistants(status: Optional[str] = None, category: Optional[str] = None):
+async def get_assistants(
+    status: Optional[str] = None, 
+    category: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
     """Get all AI assistants with optional filters"""
-    results = list(assistants_db.values())
+    repo = AssistantRepository(db)
+    results = repo.get_filtered(status, category)
     
-    if status:
-        results = [a for a in results if a.get("status") == status]
-    
-    if category:
-        results = [a for a in results if a.get("category") == category]
-    
-    return results
+    return [
+        AIAssistant(
+            id=a.id,
+            name=a.name,
+            vendor=a.vendor,
+            description=a.description or "",
+            category=a.category or "other",
+            monthly_price=a.monthly_price or 0,
+            licenses=a.licenses or 0,
+            active_users=a.active_users or 0,
+            contract_start=a.contract_start or "",
+            contract_end=a.contract_end or "",
+            status=a.status.value if a.status else "pending",
+            features=a.features or [],
+            created_at=a.created_at.isoformat() if a.created_at else ""
+        )
+        for a in results
+    ]
 
 
 @router.get("/summary")
-async def get_assistants_summary():
+async def get_assistants_summary(db: Session = Depends(get_db)):
     """Get summary statistics for AI assistants - used by dashboard"""
-    assistants = list(assistants_db.values())
-    
-    active_assistants = [a for a in assistants if a.get("status") == "active"]
-    
-    # Count active AI tools
-    active_ai_tools = len(active_assistants)
-    
-    # Calculate total monthly spend
-    monthly_spend = sum(
-        a.get("monthly_price", 0) * a.get("licenses", 0) 
-        for a in active_assistants
-    )
-    
-    # Calculate total licenses and active users
-    total_licenses = sum(a.get("licenses", 0) for a in active_assistants)
-    total_active_users = sum(a.get("active_users", 0) for a in active_assistants)
-    
-    # Calculate utilization rate
-    utilization_rate = (total_active_users / total_licenses * 100) if total_licenses > 0 else 0
-    
-    return {
-        "active_ai_tools": active_ai_tools,
-        "monthly_spend": monthly_spend,
-        "total_licenses": total_licenses,
-        "total_active_users": total_active_users,
-        "utilization_rate": round(utilization_rate, 1),
-        "by_category": _group_by_category(assistants),
-        "by_status": _group_by_status(assistants)
-    }
-
-
-def _group_by_category(assistants: List[dict]) -> dict:
-    """Group assistants by category"""
-    result = {}
-    for a in assistants:
-        cat = a.get("category", "other")
-        if cat not in result:
-            result[cat] = {"count": 0, "spend": 0}
-        result[cat]["count"] += 1
-        if a.get("status") == "active":
-            result[cat]["spend"] += a.get("monthly_price", 0) * a.get("licenses", 0)
-    return result
-
-
-def _group_by_status(assistants: List[dict]) -> dict:
-    """Group assistants by status"""
-    result = {}
-    for a in assistants:
-        status = a.get("status", "pending")
-        result[status] = result.get(status, 0) + 1
-    return result
+    repo = AssistantRepository(db)
+    return repo.get_summary()
 
 
 @router.get("/{assistant_id}", response_model=AIAssistant)
-async def get_assistant(assistant_id: str):
+async def get_assistant(assistant_id: str, db: Session = Depends(get_db)):
     """Get a specific AI assistant by ID"""
-    if assistant_id not in assistants_db:
+    repo = AssistantRepository(db)
+    a = repo.get(assistant_id)
+    if not a:
         raise HTTPException(status_code=404, detail="AI assistant not found")
-    return assistants_db[assistant_id]
+    
+    return AIAssistant(
+        id=a.id,
+        name=a.name,
+        vendor=a.vendor,
+        description=a.description or "",
+        category=a.category or "other",
+        monthly_price=a.monthly_price or 0,
+        licenses=a.licenses or 0,
+        active_users=a.active_users or 0,
+        contract_start=a.contract_start or "",
+        contract_end=a.contract_end or "",
+        status=a.status.value if a.status else "pending",
+        features=a.features or [],
+        created_at=a.created_at.isoformat() if a.created_at else ""
+    )
 
 
 @router.post("/", response_model=AIAssistant)
-async def create_assistant(data: AIAssistantCreate):
+async def create_assistant(data: AIAssistantCreate, db: Session = Depends(get_db)):
     """Create a new AI assistant"""
+    repo = AssistantRepository(db)
     assistant_id = str(uuid.uuid4())
     
-    assistant = {
-        "id": assistant_id,
-        **data.model_dump(),
-        "created_at": datetime.utcnow().isoformat()
-    }
+    db_status = None
+    try:
+        db_status = DBAssistantStatus(data.status)
+    except ValueError:
+        db_status = DBAssistantStatus.pending
     
-    assistants_db[assistant_id] = assistant
-    return assistant
+    db_assistant = AIAssistantModel(
+        id=assistant_id,
+        name=data.name,
+        vendor=data.vendor,
+        description=data.description,
+        category=data.category,
+        monthly_price=data.monthly_price,
+        licenses=data.licenses,
+        active_users=data.active_users,
+        contract_start=data.contract_start,
+        contract_end=data.contract_end,
+        status=db_status,
+        features=data.features,
+        created_at=datetime.utcnow()
+    )
+    
+    repo.create(db_assistant)
+    
+    return AIAssistant(
+        id=db_assistant.id,
+        name=db_assistant.name,
+        vendor=db_assistant.vendor,
+        description=db_assistant.description or "",
+        category=db_assistant.category or "other",
+        monthly_price=db_assistant.monthly_price or 0,
+        licenses=db_assistant.licenses or 0,
+        active_users=db_assistant.active_users or 0,
+        contract_start=db_assistant.contract_start or "",
+        contract_end=db_assistant.contract_end or "",
+        status=db_assistant.status.value if db_assistant.status else "pending",
+        features=db_assistant.features or [],
+        created_at=db_assistant.created_at.isoformat() if db_assistant.created_at else ""
+    )
 
 
 @router.put("/{assistant_id}", response_model=AIAssistant)
-async def update_assistant(assistant_id: str, data: AIAssistantCreate):
+async def update_assistant(assistant_id: str, data: AIAssistantCreate, db: Session = Depends(get_db)):
     """Update an existing AI assistant"""
-    if assistant_id not in assistants_db:
+    repo = AssistantRepository(db)
+    existing = repo.get(assistant_id)
+    if not existing:
         raise HTTPException(status_code=404, detail="AI assistant not found")
     
-    existing = assistants_db[assistant_id]
+    db_status = None
+    try:
+        db_status = DBAssistantStatus(data.status)
+    except ValueError:
+        db_status = DBAssistantStatus.pending
     
-    updated = {
-        "id": assistant_id,
-        **data.model_dump(),
-        "created_at": existing.get("created_at", datetime.utcnow().isoformat())
-    }
+    existing.name = data.name
+    existing.vendor = data.vendor
+    existing.description = data.description
+    existing.category = data.category
+    existing.monthly_price = data.monthly_price
+    existing.licenses = data.licenses
+    existing.active_users = data.active_users
+    existing.contract_start = data.contract_start
+    existing.contract_end = data.contract_end
+    existing.status = db_status
+    existing.features = data.features
     
-    assistants_db[assistant_id] = updated
-    return updated
+    repo.update(existing)
+    
+    return AIAssistant(
+        id=existing.id,
+        name=existing.name,
+        vendor=existing.vendor,
+        description=existing.description or "",
+        category=existing.category or "other",
+        monthly_price=existing.monthly_price or 0,
+        licenses=existing.licenses or 0,
+        active_users=existing.active_users or 0,
+        contract_start=existing.contract_start or "",
+        contract_end=existing.contract_end or "",
+        status=existing.status.value if existing.status else "pending",
+        features=existing.features or [],
+        created_at=existing.created_at.isoformat() if existing.created_at else ""
+    )
 
 
 @router.delete("/{assistant_id}")
-async def delete_assistant(assistant_id: str):
+async def delete_assistant(assistant_id: str, db: Session = Depends(get_db)):
     """Delete an AI assistant"""
-    if assistant_id not in assistants_db:
+    repo = AssistantRepository(db)
+    if not repo.exists(assistant_id):
         raise HTTPException(status_code=404, detail="AI assistant not found")
     
-    del assistants_db[assistant_id]
+    repo.delete(assistant_id)
     return {"message": "AI assistant deleted successfully"}
 
 
 @router.post("/sync")
-async def sync_assistants(assistants: List[AIAssistant]):
+async def sync_assistants(assistants: List[AIAssistant], db: Session = Depends(get_db)):
     """Sync assistants from frontend localStorage to backend"""
-    global assistants_db
-    assistants_db = {a.id: a.model_dump() for a in assistants}
-    return {"message": f"Synced {len(assistants)} assistants", "count": len(assistants)}
+    repo = AssistantRepository(db)
+    
+    assistants_data = []
+    for a in assistants:
+        db_status = None
+        try:
+            db_status = DBAssistantStatus(a.status)
+        except ValueError:
+            db_status = DBAssistantStatus.pending
+            
+        assistants_data.append({
+            "id": a.id,
+            "name": a.name,
+            "vendor": a.vendor,
+            "description": a.description,
+            "category": a.category,
+            "monthly_price": a.monthly_price,
+            "licenses": a.licenses,
+            "active_users": a.active_users,
+            "contract_start": a.contract_start,
+            "contract_end": a.contract_end,
+            "status": db_status,
+            "features": a.features,
+            "created_at": datetime.fromisoformat(a.created_at) if a.created_at else datetime.utcnow()
+        })
+    
+    count = repo.bulk_upsert(assistants_data)
+    return {"message": f"Synced {count} assistants", "count": count}

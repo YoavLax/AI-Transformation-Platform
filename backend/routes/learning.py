@@ -1,12 +1,16 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from typing import List, Optional
 from datetime import datetime
+from sqlalchemy.orm import Session
 import uuid
 
 from models import (
     LearningModule, LearningPath, LearningRole, 
     ChangeTemplate, TemplateCategory
 )
+from database import get_db
+from db_models import LearningProgressModel
+from repositories import LearningRepository
 
 router = APIRouter()
 
@@ -838,9 +842,6 @@ By the end of this program, participants will be able to:
     )
 }
 
-# User progress tracking (in-memory)
-user_progress: dict[str, dict] = {}
-
 
 @router.get("/paths", response_model=List[LearningPath])
 async def get_learning_paths(role: Optional[LearningRole] = None):
@@ -880,33 +881,40 @@ async def get_module(module_id: str):
 
 
 @router.post("/modules/{module_id}/complete")
-async def complete_module(module_id: str, user_id: str = "default"):
+async def complete_module(module_id: str, user_id: str = "default", db: Session = Depends(get_db)):
     """Mark a module as completed"""
-    # Find and update module
-    for path in LEARNING_PATHS.values():
-        for i, module in enumerate(path.modules):
-            if module.id == module_id:
-                # Track completion (in production, use database)
-                if user_id not in user_progress:
-                    user_progress[user_id] = {"completed_modules": []}
-                
-                if module_id not in user_progress[user_id]["completed_modules"]:
-                    user_progress[user_id]["completed_modules"].append(module_id)
-                
-                return {
-                    "message": "Module marked as complete",
-                    "module_id": module_id,
-                    "path_id": path.id
-                }
+    repo = LearningRepository(db)
     
-    raise HTTPException(status_code=404, detail="Module not found")
+    # Find module in static data to validate it exists
+    path_id = None
+    for path in LEARNING_PATHS.values():
+        for module in path.modules:
+            if module.id == module_id:
+                path_id = path.id
+                break
+        if path_id:
+            break
+    
+    if not path_id:
+        raise HTTPException(status_code=404, detail="Module not found")
+    
+    # Record completion in database
+    repo.complete_module(user_id, module_id, path_id)
+    
+    return {
+        "message": "Module marked as complete",
+        "module_id": module_id,
+        "path_id": path_id
+    }
 
 
 @router.get("/progress/{user_id}")
-async def get_user_progress(user_id: str):
+async def get_user_progress(user_id: str, db: Session = Depends(get_db)):
     """Get learning progress for a user"""
-    progress = user_progress.get(user_id, {"completed_modules": []})
-    completed = progress["completed_modules"]
+    repo = LearningRepository(db)
+    progress_records = repo.get_user_progress(user_id)
+    
+    completed = [p.module_id for p in progress_records]
     
     # Calculate progress per path
     path_progress = {}

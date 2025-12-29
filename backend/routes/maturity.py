@@ -1,14 +1,15 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from typing import List
 from datetime import datetime
+from sqlalchemy.orm import Session
 import uuid
 
 from models import TeamMaturity, TeamMaturityCreate, TeamMaturityUpdate, MaturityScores, MaturityLevel
+from database import get_db
+from db_models import TeamMaturityModel, MaturityLevel as DBMaturityLevel
+from repositories import MaturityRepository
 
 router = APIRouter()
-
-# In-memory storage
-maturity_db: dict[str, TeamMaturity] = {}
 
 
 def calculate_overall_level(scores: MaturityScores) -> MaturityLevel:
@@ -75,7 +76,7 @@ def generate_recommendations(scores: MaturityScores, strengths: List[str], impro
         recommendations.append("Share team's AI success stories and best practices with other teams")
         recommendations.append("Mentor other teams in their AI adoption journey")
     
-    return recommendations[:6]  # Return top 6 recommendations
+    return recommendations[:6]
 
 
 def generate_insights(scores: MaturityScores) -> dict:
@@ -118,124 +119,113 @@ def generate_insights(scores: MaturityScores) -> dict:
     return {"strengths": strengths, "improvement_areas": improvement_areas}
 
 
+def db_to_maturity(db_m: TeamMaturityModel) -> TeamMaturity:
+    """Convert database model to Pydantic model"""
+    scores = MaturityScores(
+        adoption=db_m.scores.get("adoption", 0) if db_m.scores else 0,
+        proficiency=db_m.scores.get("proficiency", 0) if db_m.scores else 0,
+        integration=db_m.scores.get("integration", 0) if db_m.scores else 0,
+        governance=db_m.scores.get("governance", 0) if db_m.scores else 0,
+        innovation=db_m.scores.get("innovation", 0) if db_m.scores else 0,
+    )
+    
+    return TeamMaturity(
+        id=db_m.id,
+        team=db_m.team,
+        department=db_m.department or "",
+        assessment_date=db_m.assessment_date or datetime.utcnow(),
+        scores=scores,
+        overall_level=MaturityLevel(db_m.overall_level.value) if db_m.overall_level else MaturityLevel.novice,
+        strengths=db_m.strengths or [],
+        improvement_areas=db_m.improvement_areas or [],
+        recommendations=db_m.recommendations or [],
+        assessor=db_m.assessor or "AI Enablement Team",
+    )
+
+
 @router.get("/", response_model=List[TeamMaturity])
-async def get_all_maturity_assessments():
+async def get_all_maturity_assessments(db: Session = Depends(get_db)):
     """Get all team maturity assessments"""
-    return list(maturity_db.values())
+    repo = MaturityRepository(db)
+    results = repo.get_all()
+    return [db_to_maturity(m) for m in results]
 
 
 @router.get("/summary")
-async def get_maturity_summary():
+async def get_maturity_summary(db: Session = Depends(get_db)):
     """Get organization-wide maturity summary"""
-    if not maturity_db:
-        return {
-            "total_teams": 0,
-            "org_average_scores": {
-                "adoption": 0,
-                "proficiency": 0,
-                "integration": 0,
-                "governance": 0,
-                "innovation": 0,
-            },
-            "org_overall_level": "novice",
-            "advanced_teams": 0,
-            "avg_overall_score": 0,
-            "level_distribution": {
-                "novice": 0,
-                "developing": 0,
-                "proficient": 0,
-                "advanced": 0,
-                "leading": 0,
-            }
-        }
-    
-    teams = list(maturity_db.values())
-    total = len(teams)
-    
-    # Calculate averages
-    avg_scores = MaturityScores(
-        adoption=round(sum(t.scores.adoption for t in teams) / total),
-        proficiency=round(sum(t.scores.proficiency for t in teams) / total),
-        integration=round(sum(t.scores.integration for t in teams) / total),
-        governance=round(sum(t.scores.governance for t in teams) / total),
-        innovation=round(sum(t.scores.innovation for t in teams) / total),
-    )
-    
-    # Count levels
-    level_dist = {"novice": 0, "developing": 0, "proficient": 0, "advanced": 0, "leading": 0}
-    for t in teams:
-        level_dist[t.overall_level.value] += 1
-    
-    advanced_teams = level_dist["advanced"] + level_dist["leading"]
-    
-    avg_overall = round(sum(
-        (t.scores.adoption + t.scores.proficiency + t.scores.integration + 
-         t.scores.governance + t.scores.innovation) / 5
-        for t in teams
-    ) / total)
-    
-    return {
-        "total_teams": total,
-        "org_average_scores": avg_scores.model_dump(),
-        "org_overall_level": calculate_overall_level(avg_scores).value,
-        "advanced_teams": advanced_teams,
-        "avg_overall_score": avg_overall,
-        "level_distribution": level_dist,
-    }
+    repo = MaturityRepository(db)
+    return repo.get_summary()
 
 
 @router.get("/{maturity_id}", response_model=TeamMaturity)
-async def get_maturity_assessment(maturity_id: str):
+async def get_maturity_assessment(maturity_id: str, db: Session = Depends(get_db)):
     """Get a specific team maturity assessment"""
-    if maturity_id not in maturity_db:
+    repo = MaturityRepository(db)
+    result = repo.get(maturity_id)
+    if not result:
         raise HTTPException(status_code=404, detail="Team maturity assessment not found")
-    return maturity_db[maturity_id]
+    return db_to_maturity(result)
 
 
 @router.post("/", response_model=TeamMaturity)
-async def create_maturity_assessment(data: TeamMaturityCreate):
+async def create_maturity_assessment(data: TeamMaturityCreate, db: Session = Depends(get_db)):
     """Create a new team maturity assessment"""
+    repo = MaturityRepository(db)
     maturity_id = str(uuid.uuid4())
     
     overall_level = calculate_overall_level(data.scores)
     insights = generate_insights(data.scores)
     
-    # Use provided strengths/improvements or generate them
     strengths = data.strengths if data.strengths else insights["strengths"]
     improvement_areas = data.improvement_areas if data.improvement_areas else insights["improvement_areas"]
-    
-    # Use provided recommendations or generate them
     recommendations = data.recommendations if data.recommendations else generate_recommendations(
         data.scores, strengths, improvement_areas
     )
     
-    assessment = TeamMaturity(
+    db_level = DBMaturityLevel(overall_level.value)
+    
+    db_maturity = TeamMaturityModel(
         id=maturity_id,
         team=data.team,
         department=data.department,
         assessment_date=datetime.utcnow(),
-        scores=data.scores,
-        overall_level=overall_level,
+        scores={
+            "adoption": data.scores.adoption,
+            "proficiency": data.scores.proficiency,
+            "integration": data.scores.integration,
+            "governance": data.scores.governance,
+            "innovation": data.scores.innovation,
+        },
+        overall_level=db_level,
         strengths=strengths,
         improvement_areas=improvement_areas,
         recommendations=recommendations,
         assessor=data.assessor or "AI Enablement Team",
     )
     
-    maturity_db[maturity_id] = assessment
-    return assessment
+    repo.create(db_maturity)
+    return db_to_maturity(db_maturity)
 
 
 @router.put("/{maturity_id}", response_model=TeamMaturity)
-async def update_maturity_assessment(maturity_id: str, data: TeamMaturityUpdate):
+async def update_maturity_assessment(maturity_id: str, data: TeamMaturityUpdate, db: Session = Depends(get_db)):
     """Update an existing team maturity assessment"""
-    if maturity_id not in maturity_db:
+    repo = MaturityRepository(db)
+    existing = repo.get(maturity_id)
+    if not existing:
         raise HTTPException(status_code=404, detail="Team maturity assessment not found")
     
-    existing = maturity_db[maturity_id]
+    # Get existing scores
+    existing_scores = MaturityScores(
+        adoption=existing.scores.get("adoption", 0) if existing.scores else 0,
+        proficiency=existing.scores.get("proficiency", 0) if existing.scores else 0,
+        integration=existing.scores.get("integration", 0) if existing.scores else 0,
+        governance=existing.scores.get("governance", 0) if existing.scores else 0,
+        innovation=existing.scores.get("innovation", 0) if existing.scores else 0,
+    )
     
-    # Update scores if provided
-    scores = data.scores if data.scores else existing.scores
+    scores = data.scores if data.scores else existing_scores
     overall_level = calculate_overall_level(scores)
     
     insights = generate_insights(scores)
@@ -245,40 +235,50 @@ async def update_maturity_assessment(maturity_id: str, data: TeamMaturityUpdate)
         scores, strengths, improvement_areas
     )
     
-    updated = TeamMaturity(
-        id=maturity_id,
-        team=data.team if data.team else existing.team,
-        department=data.department if data.department else existing.department,
-        assessment_date=datetime.utcnow(),
-        scores=scores,
-        overall_level=overall_level,
-        strengths=strengths,
-        improvement_areas=improvement_areas,
-        recommendations=recommendations,
-        assessor=data.assessor if data.assessor else existing.assessor,
-    )
+    db_level = DBMaturityLevel(overall_level.value)
     
-    maturity_db[maturity_id] = updated
-    return updated
+    existing.team = data.team if data.team else existing.team
+    existing.department = data.department if data.department else existing.department
+    existing.assessment_date = datetime.utcnow()
+    existing.scores = {
+        "adoption": scores.adoption,
+        "proficiency": scores.proficiency,
+        "integration": scores.integration,
+        "governance": scores.governance,
+        "innovation": scores.innovation,
+    }
+    existing.overall_level = db_level
+    existing.strengths = strengths
+    existing.improvement_areas = improvement_areas
+    existing.recommendations = recommendations
+    existing.assessor = data.assessor if data.assessor else existing.assessor
+    
+    repo.update(existing)
+    return db_to_maturity(existing)
 
 
 @router.delete("/{maturity_id}")
-async def delete_maturity_assessment(maturity_id: str):
+async def delete_maturity_assessment(maturity_id: str, db: Session = Depends(get_db)):
     """Delete a team maturity assessment"""
-    if maturity_id not in maturity_db:
+    repo = MaturityRepository(db)
+    if not repo.exists(maturity_id):
         raise HTTPException(status_code=404, detail="Team maturity assessment not found")
     
-    del maturity_db[maturity_id]
+    repo.delete(maturity_id)
     return {"message": "Team maturity assessment deleted successfully"}
 
 
 @router.get("/team/{team_name}", response_model=List[TeamMaturity])
-async def get_maturity_by_team(team_name: str):
+async def get_maturity_by_team(team_name: str, db: Session = Depends(get_db)):
     """Get all maturity assessments for a specific team (history)"""
-    return [m for m in maturity_db.values() if m.team.lower() == team_name.lower()]
+    repo = MaturityRepository(db)
+    results = repo.get_by_team(team_name)
+    return [db_to_maturity(m) for m in results]
 
 
 @router.get("/department/{department}", response_model=List[TeamMaturity])
-async def get_maturity_by_department(department: str):
+async def get_maturity_by_department(department: str, db: Session = Depends(get_db)):
     """Get all maturity assessments for a specific department"""
-    return [m for m in maturity_db.values() if m.department.lower() == department.lower()]
+    repo = MaturityRepository(db)
+    results = repo.get_by_department(department)
+    return [db_to_maturity(m) for m in results]

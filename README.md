@@ -10,50 +10,6 @@ A comprehensive web-based platform for enterprise AI transformation leaders, des
 
 Empowering engineering teams to successfully navigate their AI transformation journey—from initial assessment through full organizational adoption with an AI-native culture.
 
-## 🚀 Quick Start
-
-### Prerequisites
-- Node.js 18+ and npm
-- Python 3.11+
-
-### Running the Application
-
-**Option 1: Run Both Servers**
-
-Open two terminal windows:
-
-**Terminal 1 - Backend (FastAPI)**:
-```bash
-cd backend
-python -m venv .venv
-.venv/Scripts/activate  # Windows
-# or: source .venv/bin/activate  # Mac/Linux
-pip install -r requirements.txt
-uvicorn main:app --reload --port 8000
-```
-
-**Terminal 2 - Frontend (Next.js)**:
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-**Option 2: Quick Start Script (after initial setup)**:
-```bash
-# Terminal 1: Backend
-cd backend && uvicorn main:app --reload --port 8000
-
-# Terminal 2: Frontend  
-cd frontend && npm run dev
-```
-
-### Access the Application
-- **Frontend**: http://localhost:3000
-- **Backend API**: http://localhost:8000
-- **API Documentation**: http://localhost:8000/docs (Swagger UI)
-- **Alternative API Docs**: http://localhost:8000/redoc (ReDoc)
-
 ---
 
 ## 📋 Features
@@ -70,17 +26,23 @@ cd frontend && npm run dev
 - Monitor active users vs licenses
 - Contract and renewal management
 
+![AI Assistants](screenshots/Assistants.png)
+
 ### 3. AI Initiatives
 - Initiative portfolio management
 - Risk heatmap visualization
 - Status tracking and progress monitoring
 - Resource allocation insights
 
+![AI Initiatives](screenshots/Initiatives.png)
+
 ### 4. Usage Metrics
 - Comprehensive AI adoption analytics
 - Team-level usage tracking
 - Trend analysis and reporting
 - Feature utilization breakdown
+
+![Usage Metrics](screenshots/AI%20Usage.png)
 
 ### 5. Team Maturity Assessment
 - 10-question assessment wizard covering 5 dimensions:
@@ -93,6 +55,8 @@ cd frontend && npm run dev
 - Personalized recommendations
 - Historical assessment tracking
 
+![Team Maturity](screenshots/Team%20Maturity.png)
+
 ### 6. AI Culture 🏆
 Critical milestones for building an AI-native organization:
 - **AI Guild**: Cross-functional community of practice for AI practitioners
@@ -102,12 +66,16 @@ Critical milestones for building an AI-native organization:
 - Culture milestone tracking and progress visualization
 - Engagement metrics and participation rates
 
+![AI Culture](screenshots/AICulture.png)
+
 ### 7. Value Tracking
 - KPI management and ROI tracking
 - Engineering value metrics by team
 - Time savings and productivity gains
 - Target vs actual comparisons
 - Trend charts and analytics
+
+![Value Tracking](screenshots/Value.png)
 
 ### 8. Use Case Prioritization
 - Use case intake form with scoring
@@ -136,6 +104,8 @@ Production-ready reference architectures:
 - Code Assistant Integration
 - AI-Powered Testing
 
+![Architecture Blueprints](screenshots/Blueprints.png)
+
 ### 11. Learning & Change Management
 Role-based learning paths:
 - **Executive**: AI Leadership & Strategy
@@ -148,6 +118,34 @@ Change management templates:
 - Stakeholder analysis
 - Adoption checklists
 - Training program outlines
+
+![Learning](screenshots/Lrearning.png)
+
+---
+
+## 🎨 Tech Stack
+
+### Frontend
+- **Framework**: Next.js 16 (App Router with Turbopack)
+- **Language**: TypeScript
+- **Styling**: Tailwind CSS
+- **Charts**: Recharts
+- **Icons**: Lucide React
+- **State**: React useState + localStorage
+
+### Backend
+- **Framework**: FastAPI
+- **Language**: Python 3.11
+- **Database**: PostgreSQL 16 (via Docker)
+- **ORM**: SQLAlchemy 2.0+
+- **Validation**: Pydantic
+- **Server**: Uvicorn
+
+### Database
+- **PostgreSQL 16**: Production-ready relational database
+- **SQLAlchemy**: ORM with JSONB support for flexible data
+- **Repository Pattern**: Clean data access layer
+- **Docker Compose**: Easy local development setup
 
 ---
 
@@ -189,34 +187,108 @@ frontend/
 backend/
 ├── main.py                     # FastAPI app entry point
 ├── models.py                   # Pydantic models
+├── database.py                 # SQLAlchemy database connection
+├── db_models.py                # SQLAlchemy ORM models
 ├── requirements.txt
+├── .env.example                # Environment template
+├── repositories/               # Data access layer
+│   ├── base.py                # Base repository class
+│   ├── assessments.py         # Assessment repository
+│   ├── use_cases.py           # Use case repository
+│   ├── governance.py          # Governance repository
+│   ├── value_tracking.py      # Value tracking repository
+│   ├── assistants.py          # Assistants repository
+│   ├── initiatives.py         # Initiatives repository
+│   ├── maturity.py            # Maturity repository
+│   ├── metrics.py             # Metrics repository
+│   └── learning.py            # Learning repository
 └── routes/
     ├── assessments.py         # Assessment endpoints
     ├── use_cases.py           # Use case endpoints
     ├── governance.py          # Governance endpoints
     ├── value_tracking.py      # Value tracking endpoints
     ├── blueprints.py          # Blueprint endpoints
+    ├── assistants.py          # Assistants endpoints
+    ├── initiatives.py         # Initiatives endpoints
+    ├── maturity.py            # Maturity endpoints
+    ├── metrics.py             # Metrics endpoints
+    ├── dashboard.py           # Dashboard endpoints
     └── learning.py            # Learning endpoints
 ```
 
 ---
 
-## 🎨 Tech Stack
+## 🚀 Getting Started
 
-### Frontend
-- **Framework**: Next.js 16 (App Router with Turbopack)
-- **Language**: TypeScript
-- **Styling**: Tailwind CSS
-- **Charts**: Recharts
-- **Icons**: Lucide React
-- **State**: React useState + localStorage
+### Prerequisites
+- Node.js 18+ and npm
+- Python 3.11+
+- Docker (for PostgreSQL database)
 
-### Backend
-- **Framework**: FastAPI
-- **Language**: Python 3.11
-- **Validation**: Pydantic
-- **Server**: Uvicorn
-- **Storage**: In-memory (demo) / localStorage sync
+### Setup
+
+#### 1. Start the Database (PostgreSQL via Docker)
+```bash
+# From the project root
+docker-compose up -d
+```
+
+This starts a PostgreSQL 16 container with:
+- **Database**: `ai_os`
+- **User**: `postgres`
+- **Password**: `postgres`
+- **Port**: `5432`
+
+#### 2. Configure Backend Environment
+```bash
+cd backend
+cp .env.example .env
+# Edit .env if needed (defaults work with Docker setup)
+```
+
+#### 3. Start the Backend (FastAPI)
+```bash
+cd backend
+python -m venv .venv
+.venv/Scripts/activate  # Windows
+# or: source .venv/bin/activate  # Mac/Linux
+pip install -r requirements.txt
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
+```
+
+#### 4. Start the Frontend (Next.js)
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+### Quick Start (After Initial Setup)
+```bash
+# Terminal 1: Database (if not already running)
+docker-compose up -d
+
+# Terminal 2: Backend
+cd backend && .venv/Scripts/activate && uvicorn main:app --reload --host 0.0.0.0 --port 8000
+
+# Terminal 3: Frontend  
+cd frontend && npm run dev
+```
+
+### Access the Application
+- **Frontend**: http://localhost:3000
+- **Backend API**: http://localhost:8000
+- **API Documentation**: http://localhost:8000/docs (Swagger UI)
+- **Alternative API Docs**: http://localhost:8000/redoc (ReDoc)
+
+### Verify Database Connection
+```bash
+# Check PostgreSQL is running
+docker exec ai-os-postgres psql -U postgres -d ai_os -c "\dt"
+
+# View data in tables
+docker exec ai-os-postgres psql -U postgres -d ai_os -c "SELECT * FROM ai_assistants;"
+```
 
 ---
 
@@ -244,9 +316,16 @@ Note: Set `NEXT_TURBOPACK_EXPERIMENTAL_USE_SYSTEM_TLS_CERTS=1` if you encounter 
 
 ## 📝 Notes
 
-- **Data Persistence**: Frontend uses localStorage for data persistence. Backend uses in-memory storage (resets on restart).
+- **Data Persistence**: Data is stored in PostgreSQL database. Frontend also caches data in localStorage for offline resilience and syncs to the API.
 - **Authentication**: Not implemented. Add authentication before production use.
-- **Database**: No database configured. For production, add PostgreSQL/MongoDB.
+- **Database Backup**: For production, configure regular PostgreSQL backups.
+
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `DATABASE_URL` | PostgreSQL connection string | `postgresql://postgres:postgres@127.0.0.1:5432/ai_os` |
+| `NEXT_PUBLIC_API_URL` | Backend API URL (frontend) | `http://localhost:8000` |
 
 ---
 

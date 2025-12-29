@@ -1,11 +1,34 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
+
 from routes import assessments, use_cases, governance, value_tracking, blueprints, learning, dashboard, assistants, metrics, initiatives, maturity
+from database import init_db, check_db_connection
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan manager for startup and shutdown events"""
+    # Startup: Initialize database
+    print("Starting AI-OS API...")
+    try:
+        init_db()
+        print("Database tables initialized successfully")
+    except Exception as e:
+        print(f"Warning: Database initialization failed: {e}")
+        print("The application will start but database features may not work")
+    
+    yield
+    
+    # Shutdown: Cleanup if needed
+    print("Shutting down AI-OS API...")
+
 
 app = FastAPI(
     title="AI-OS API",
     description="API for the AI Transformation Operating System",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 # CORS configuration
@@ -38,4 +61,9 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy"}
+    """Health check endpoint that also verifies database connection"""
+    db_status = check_db_connection()
+    return {
+        "status": "healthy" if db_status else "degraded",
+        "database": "connected" if db_status else "disconnected"
+    }
